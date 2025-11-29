@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import asyncio
 from threading import Thread
 
-# .env laden
+# .env laden (lokal) oder Env Vars (Render)
 load_dotenv()
 
 # Debug: Pfad und Token checken
@@ -15,7 +15,10 @@ current_dir = os.getcwd()
 print(f"Aktueller Ordner: {current_dir}")
 print(f".env-Pfad existiert: {os.path.exists('.env')}")
 token = os.getenv('DISCORD_TOKEN')
-print(f"Gefundener Token (gekürzt): {token[:20] if token else 'NICHT GEFUNDEN'}...")
+if token:
+    print(f"Gefundener Token (gekürzt): {token[:20]}...")
+else:
+    print("❌ DISCORD_TOKEN nicht gefunden! Setze als Env Var in Render.")
 
 # Bot-Setup: Intents aktivieren
 intents = discord.Intents.default()
@@ -216,19 +219,17 @@ async def create_ticket(interaction: discord.Interaction, reason: str = "Kein Gr
 
 # Bot starten (parallel Flask + Bot für Render)
 if not token:
-    print("Fehler: DISCORD_TOKEN nicht gefunden! Check .env-Datei.")
-    input("Drücke Enter, um zu beenden...")  # Pausiert, damit du's siehst
-    exit(1)
+    print("❌ Fehler: DISCORD_TOKEN nicht gefunden! Setze als Env Var in Render oder check .env lokal.")
+else:
+    def run_flask():
+        port = int(os.environ.get('PORT', 5000))
+        app.run(host='0.0.0.0', port=port)
+        print(f"Flask-Webserver läuft auf Port {port} (für Render)")
 
-def run_flask():
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-    print("Flask-Webserver läuft auf Port {port} (für Render)")
+    async def run_bot():
+        await bot.start(token)
 
-async def run_bot():
-    await bot.start(token)
-
-if __name__ == '__main__':
-    flask_thread = Thread(target=run_flask)
-    flask_thread.start()
-    asyncio.run(run_bot())
+    if __name__ == '__main__':
+        flask_thread = Thread(target=run_flask)
+        flask_thread.start()
+        asyncio.run(run_bot())
