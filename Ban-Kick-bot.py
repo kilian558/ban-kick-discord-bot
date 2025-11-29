@@ -214,4 +214,23 @@ if not token:
     print("Fehler: DISCORD_TOKEN nicht gefunden! Check .env-Datei.")
     input("Drücke Enter, um zu beenden...")  # Pausiert, damit du's siehst
     exit(1)
+
+import asyncio
+from threading import Thread
+
+
+def run_flask():
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)  # App aus webserver.py importieren
+
+
+async def run_bot():
+    await bot.start(token)  # Dein bot.run(token) ersetzen
+
+
+if __name__ == '__main__':
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+    asyncio.run(run_bot())
+
 bot.run(token)
