@@ -1,8 +1,11 @@
+from webserver import app  # Flask-App importieren (für Render)
 import discord
 from discord.ext import commands
 from discord import app_commands
 import os
 from dotenv import load_dotenv
+import asyncio
+from threading import Thread
 
 # .env laden
 load_dotenv()
@@ -158,12 +161,14 @@ async def create_ticket_channel(interaction: discord.Interaction, reason: str):
 async def on_ready():
     print(f'{bot.user} ist online!')
     try:
-        synced = await bot.tree.sync()
-        print(f'{len(synced)} Commands synchronisiert.')
+        # Guild-Sync für schnelle Commands in DEINEM Server
+        guild = discord.Object(id=1443766526388736133)
+        synced = await bot.tree.sync(guild=guild)
+        print(f'{len(synced)} Commands für Guild synced.')  # z.B. "1 Commands für Guild synced."
     except Exception as e:
-        print(f'Sync-Fehler: {e}')
+        print(f'Sync-Fehler: {e}')  # Falls ID falsch: "Invalid guild ID"
 
-    # Persistent View hinzufügen (wichtig für alte Buttons!)
+    # Persistent View hinzufügen (für Buttons)
     try:
         bot.add_view(TicketView())
         print("✅ Persistent View hinzugefügt!")
@@ -209,28 +214,21 @@ async def create_ticket(interaction: discord.Interaction, reason: str = "Kein Gr
     await interaction.response.defer(ephemeral=True)  # Defer für längere Verarbeitung
     await create_ticket_channel(interaction, reason)
 
-# Bot starten
+# Bot starten (parallel Flask + Bot für Render)
 if not token:
     print("Fehler: DISCORD_TOKEN nicht gefunden! Check .env-Datei.")
     input("Drücke Enter, um zu beenden...")  # Pausiert, damit du's siehst
     exit(1)
 
-import asyncio
-from threading import Thread
-
-
 def run_flask():
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)  # App aus webserver.py importieren
-
+    app.run(host='0.0.0.0', port=port)
+    print("Flask-Webserver läuft auf Port {port} (für Render)")
 
 async def run_bot():
-    await bot.start(token)  # Dein bot.run(token) ersetzen
-
+    await bot.start(token)
 
 if __name__ == '__main__':
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
     asyncio.run(run_bot())
-
-bot.run(token)
