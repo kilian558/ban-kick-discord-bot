@@ -64,49 +64,78 @@ class TicketView(discord.ui.View):
         print(f"🔘 Button geklickt von {interaction.user}")
         await interaction.response.send_modal(TicketModal())  # Direkt senden – kein Defer davor!
 
-# Neue View für Close-Button im Ticket (nur HLL Admin oder höher)
+# Neue View für Close-Button im Ticket (nur HLL Admin oder höher, persistent)
 class TicketCloseView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=300)  # 5 Min. Timeout
+        super().__init__(timeout=None)  # Persistent – kein Timeout mehr!
 
     @discord.ui.button(label="Schließen", style=discord.ButtonStyle.success, emoji="🟢")
     async def close_ticket_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print(f"🔘 Close-Button geklickt von {interaction.user} (ID: {interaction.user.id}) in Kanal {interaction.channel.name}")
+        print(f"User-Rollen: {[role.name for role in interaction.user.roles]}")  # Debug: Zeigt Rollen
+
+        # Defer für schnelle Response (verhindert "Fehlgeschlagen")
+        await interaction.response.defer(ephemeral=True)
+
         # Check für HLL Admin oder höhere Rolle (basierend auf Position)
         admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_ROLE_NAME)
         if not admin_role:
-            await interaction.response.send_message("❌ Nur HLL Admin dürfen Tickets schließen!", ephemeral=True)
+            print(f"❌ Admin-Rolle '{ADMIN_ROLE_NAME}' nicht gefunden! Verfügbare Rollen: {[r.name for r in interaction.guild.roles if 'admin' in r.name.lower()]}")
+            try:
+                await interaction.followup.send("❌ Rolle 'HLL Admin' nicht gefunden – kontaktiere Entwickler!", ephemeral=True)
+            except:
+                print("❌ Followup für Rolle-Fehler fehlgeschlagen")
             return
-        if not any(role.position >= admin_role.position for role in interaction.user.roles):
-            await interaction.response.send_message(f"❌ Nur HLL Admin dürfen Tickets schließen!", ephemeral=True)
+
+        print(f"Admin-Rolle gefunden: '{admin_role.name}' (Position: {admin_role.position})")
+
+        user_has_admin = any(role.position >= admin_role.position for role in interaction.user.roles)
+        if not user_has_admin:
+            print(f"❌ User {interaction.user} hat keine Admin-Rolle (User-Positionen: {[r.position for r in interaction.user.roles]})")
+            try:
+                await interaction.followup.send(f"❌ Nur {ADMIN_ROLE_NAME} oder höher dürfen Tickets schließen! Deine Rollen: {', '.join([r.mention for r in interaction.user.roles])}", ephemeral=True)
+            except:
+                print("❌ Followup für Permission-Fehler fehlgeschlagen")
             return
+
+        print(f"✅ User {interaction.user} hat Admin-Rechte – schließe Ticket.")
 
         channel = interaction.channel
         if channel.name.startswith("ticket-"):
-            # User-ID des Ticket-Erstellers extrahieren
+            # User-ID des Ticket-Erstellers extrahieren & Zugriff entfernen
             try:
                 user_id = int(channel.name.split('-')[1])
                 ticket_user = interaction.guild.get_member(user_id)
                 if ticket_user:
-                    # Benutzer aus Overwrites entfernen (setzt auf Default-Rechte, sieht Kanal nicht mehr)
                     await channel.set_permissions(ticket_user, overwrite=None)
-                    print(f"✅ Ticket-Ersteller {ticket_user} hat Zugang zu {channel.name} verloren.")
+                    print(f"✅ Ticket-Ersteller {ticket_user} (ID: {user_id}) hat Zugang verloren.")
                 else:
-                    print(f"⚠️ Ticket-Ersteller mit ID {user_id} nicht im Server gefunden.")
+                    print(f"⚠️ Ticket-Ersteller ID {user_id} nicht im Server.")
             except (ValueError, IndexError):
-                print(f"❌ Fehler beim Extrahieren der User-ID aus {channel.name}")
+                print(f"❌ User-ID extrahieren fehlgeschlagen aus {channel.name}")
 
             # Archiv-Kategorie erstellen/finden
             archive_category = discord.utils.get(interaction.guild.categories, name=ARCHIVE_CATEGORY)
             if not archive_category:
                 archive_category = await interaction.guild.create_category(ARCHIVE_CATEGORY)
+                print(f"✅ Archiv-Kategorie '{ARCHIVE_CATEGORY}' erstellt.")
 
-            # Kanal in Archiv verschieben
+            # Kanal verschieben & Embed senden
             embed = discord.Embed(title="Ticket geschlossen",
                                   description="Dieses Ticket wurde archiviert. Danke für deine Rückmeldung!",
                                   color=discord.Color.green())
-            await interaction.response.send_message(embed=embed)
-            await channel.edit(category=archive_category)
-            print(f"✅ Ticket-Kanal {channel.name} archiviert von {ADMIN_ROLE_NAME}+ {interaction.user}!")
+            try:
+                await interaction.followup.send(embed=embed)  # Followup, da defer
+                await channel.edit(category=archive_category)
+                print(f"✅ Ticket {channel.name} archiviert von {interaction.user}!")
+            except discord.Forbidden as e:
+                print(f"❌ Permission-Fehler beim Editieren: {e} – Bot braucht 'Manage Channels'!")
+                await interaction.followup.send("❌ Fehler: Bot kann Kanal nicht verschieben. Kontaktiere Entwickler!", ephemeral=True)
+            except Exception as e:
+                print(f"❌ Unerwarteter Fehler beim Schließen: {e}")
+                await interaction.followup.send(f"❌ Fehler beim Schließen: {str(e)}", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Das ist kein Ticket-Kanal!", ephemeral=True)
 
 # Hilfsfunktion: Ticket-Kanal erstellen (getrennt für Reuse)
 async def create_ticket_channel(interaction: discord.Interaction, reason: str):
@@ -171,10 +200,11 @@ async def on_ready():
     except Exception as e:
         print(f'Sync-Fehler: {e}')  # Falls ID falsch: "Invalid guild ID"
 
-    # Persistent View hinzufügen (für Buttons)
+    # Persistent Views hinzufügen (für Buttons)
     try:
         bot.add_view(TicketView())
-        print("✅ Persistent View hinzugefügt!")
+        bot.add_view(TicketCloseView())  # Auch Close-View persistent
+        print("✅ Persistent Views (Ticket & Close) hinzugefügt!")
     except Exception as e:
         print(f"❌ View-Hinzufügen-Fehler: {e}")
 
